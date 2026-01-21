@@ -1,0 +1,1021 @@
+---
+title: "Bateria de Testes de Inteligência Emocional"
+subtitle: "Estudos Psicométricos 2025" 
+date: "`r Sys.Date()`"
+format:
+  html: 
+    toc: true
+    toc-depth: 3
+    toc-title: Sumário
+    toc-expand: true
+    toc-location: left
+execute: 
+  eval: true
+editor: 
+  markdown: 
+    wrap: 72
+---
+
+{{<pagebreak>}}
+
+```{r}
+pacman::p_load(tidyverse, readxl, writexl, psych, knitr, pander, openxlsx, lavaan,semPlot)
+```
+
+```{r}
+# Foram realizadas duas coletas de dados, com duas turmas de Técnicas psicométricas.
+# bd_bie_org.xlsx contém os dados coletados pela primeira turma (2025.1)
+# bd_bie_org_dez2025.xlsx contém os dados coletados pela primeira turma, mais os dados coletados pela segunda turma (2025.2)
+
+# df1 = read_xlsx("bd_bie_org.xlsx") 
+df1 = read_xlsx("bd_bie_org_dez2025.xlsx") # banco de dados das duas turmas de 2025.
+
+```
+
+# Transformações nas variáveis
+
+```{r}
+# Processamento e transformação das variáveis sociodemográficas ----------------
+df1 <- df1 %>%
+  mutate(
+    # 1. Conversão de Idade para numérico (double)
+    # Nota: O warning "NAs introduced by coercion" é esperado se houver textos não numéricos
+    idade = as.numeric(idade),
+    
+    # 2. Criação da variável sexo_bin
+    # Define "Prefiro não responder" como NA, mantém os demais, depois converte para fator
+    sexo_bin = if_else(sexo == "Prefiro não responder", NA_character_, sexo),
+    sexo_bin = as.factor(sexo_bin),
+    
+    # 3. Recodificação da variável Estado Civil
+    # Agrupa categorias de relacionamento em "Solteiro(a)"
+    est_civil = case_when(
+      est_civil %in% c("Comprometido", "Compromissada", 
+                       "Namorando", "namorando") ~ "Solteiro(a)",
+      TRUE ~ est_civil # Mantém as outras categorias inalteradas
+    )
+  ) %>%
+  mutate(
+    # 4. Conversão das demais variáveis categóricas para fator
+    sexo = as.factor(sexo),
+    genero = as.factor(genero),
+    
+    # Tratamento especial para Escolaridade (Variável Ordinal)
+    # Definimos a ordem lógica dos níveis para análises estatísticas corretas
+    escolaridade = factor(escolaridade, levels = c(
+      "Ensino fundamental completo ou incompleto",
+      "Ensino médio completo ou incompleto",
+      "Ensino superior completo ou incompleto (graduação)",
+      "Ensino superior completo ou incompleto (pós-graduação)"
+    ), ordered = TRUE),
+    
+    est_civil = as.factor(est_civil),
+    cor = as.factor(cor),
+    cota = as.factor(cota)
+  )
+
+# inserir categoria "Indígena" na variável cor
+### isso será importante para a junção com outros bancos de dados.
+df1 <- df1 %>%
+  mutate(cor = fct_expand(cor, "Indígena"))
+
+class(df1$cor)
+# Verificação das transformações -----------------------------------------------
+# Exibe a estrutura dos dados para confirmar os tipos (dbl, factor, etc.)
+glimpse(df1[1:10])
+
+# Verifica se a recodificação de Estado Civil funcionou conforme esperado
+table(df1$cor)
+
+# Verifica a criação da variável binária de sexo e a presença de NAs
+summary(df1$cor)
+
+# Tratamento da variável Idade ----------------------------------------
+df1 <- df1 %>%
+  mutate(
+    idade = case_when(
+      # 1. Correção específica dos anos de nascimento identificados
+      idade == 1982 ~ 43,
+      idade == 1983 ~ 42,
+      
+      # 2. Remoção apenas de valores extremos (> 2000)
+      # Valores como 24191979 ou 4591360466 serão convertidos em NA
+      idade > 2000 ~ NA_real_,
+      
+      # 3. Manutenção dos demais valores (idades corretas < 100)
+      TRUE ~ idade
+    )
+  )
+
+# Verificação das alterações
+# Confirma se os anos 1982/1983 desapareceram e se os extremos viraram NA
+summary(df1$idade)
+
+# Tratamento da variável nota --------------------------------------------------
+# Listagem dos valores únicos ordenados para inspeção final (opcional)
+# Isso ajuda a garantir que não restou nenhuma idade implausível (ex: 150)
+sort(unique(df1$idade), decreasing = TRUE) %>% head(10)
+
+
+# Tratamento da variável nota_ens_superior com normalização de escala
+df1 <- df1 %>%
+  mutate(
+    # 1. Padronização e conversão para numérico
+    # Substitui vírgula por ponto e converte o texto para número
+    nota_ens_superior = str_replace(nota_ens_superior, ",", "."),
+    nota_ens_superior = as.numeric(nota_ens_superior),
+    
+    # 2. Normalização para a escala 0-10
+    # A ordem decrescente das condições é crítica para o funcionamento correto
+    nota_ens_superior = case_when(
+      nota_ens_superior > 100000 ~ nota_ens_superior / 100000,
+      nota_ens_superior > 10000  ~ nota_ens_superior / 10000,
+      nota_ens_superior > 1000   ~ nota_ens_superior / 1000,
+      nota_ens_superior > 100    ~ nota_ens_superior / 100,
+      nota_ens_superior > 10     ~ nota_ens_superior / 10,
+      TRUE ~ nota_ens_superior   # Mantém valores que já estão entre 0 e 10 (e NAs)
+    )
+  )
+
+# Verificação dos resultados
+# O histograma deve mostrar todos os dados concentrados entre 0 e 10 agora
+summary(df1$nota_ens_superior)
+hist(df1$nota_ens_superior, 
+     main = "Distribuição das Notas (Escala 0-10)", 
+     xlab = "Nota", 
+     xlim = c(7, 10),
+     breaks = 20)
+
+# eliminação de notas inferiores a 7
+df1$nota_ens_superior <- ifelse(df1$nota_ens_superior < 7, NA, df1$nota_ens_superior) %>% round(2)
+
+# descarte de notas superiores a 10. 
+df1$nota_ens_superior <- ifelse(df1$nota_ens_superior > 10, NA, df1$nota_ens_superior) %>% describe()
+
+glimpse(df1)
+```
+
+# Cópia de segurança 1 (df1_seg1)
+```{r}
+df1_seg1 = df1
+```
+
+
+# Estatísticas descritivas - variáveis sociodemográficas
+
+```{r}
+# Estatísticas descritivas
+desc_age <- df1 %>% select(idade) %>% describe() %>% select(n, mean, sd, min, max, skew, kurtosis)
+desc_sex <- df1 %>% count(sexo) %>% mutate(porc = n/sum(n) * 100)
+desc_gen <- df1 %>% count(genero) %>% mutate(porc = n/sum(n) * 100)
+desc_esc <- df1 %>% count(escolaridade) %>% mutate(porc = n/sum(n) * 100)
+desc_civ <- df1 %>% count(est_civil) %>% mutate(porc = n/sum(n) * 100) 
+desc_cor <- df1 %>% count(cor) %>% mutate(porc = n/sum(n) * 100)
+desc_cot <- df1 %>% count(cota) %>% mutate(porc = n/sum(n) * 100)
+
+# Criar workbook
+wb1 <- createWorkbook()
+
+# Adicionar abas
+addWorksheet(wb1, sheetName = 'idade')
+writeData(wb1, sheet = "idade", x = desc_age)
+
+addWorksheet(wb1, sheetName = 'sexo')
+writeData(wb1, sheet = "sexo", x = desc_sex)
+
+addWorksheet(wb1, sheetName = 'gene')
+writeData(wb1, sheet = "gene", x = desc_gen)
+
+addWorksheet(wb1, sheetName = 'esco')
+writeData(wb1, sheet = "esco", x = desc_esc)
+
+addWorksheet(wb1, sheetName = 'eciv')
+writeData(wb1, sheet = "eciv", x = desc_civ)
+
+addWorksheet(wb1, sheetName = 'cor_')
+writeData(wb1, sheet = "cor_", x = desc_cor)
+
+addWorksheet(wb1, sheetName = 'cota')
+writeData(wb1, sheet = "cota", x = desc_cot)
+
+# Salvar workbook
+saveWorkbook(wb1, "descritivas.xlsx", overwrite = TRUE)
+```
+
+A amostra final foi composta por 544 participantes. As idades variaram
+entre 18 e 72 anos, com uma média de 25,92 anos ($DP = 11,49$). A
+distribuição de idade apresentou assimetria positiva
+($Skewness = 1,88$), indicando uma concentração maior de participantes
+nas faixas etárias mais jovens. Quanto à caracterização
+sociodemográfica, 58,6% autodeclararam-se mulheres ($n = 319$) e 38,6%
+homens ($n = 210$); participantes não-binários, transgênero ou que
+preferiram não responder somaram, em conjunto, menos de 3% da amostra.
+No que tange à cor ou raça, a maioria dos participantes autodeclarou-se
+branca (53,3%; $n = 290$), seguida por parda (33,1%; $n = 180$) e preta
+(12,5%; $n = 68$). Apenas 1,1% ($n = 6$) identificou-se como amarela.
+Adicionalmente, 28,1% ($n = 153$) dos respondentes informaram ter
+ingressado na instituição ou curso através do sistema de cotas. Em
+relação ao nível de escolaridade, a maior parte da amostra concentrou-se
+no ensino superior completo ou incompleto (graduação), perfazendo 60,7%
+($n = 330$), seguido por participantes com ensino médio completo ou
+incompleto (25,6%; $n = 139$) e pós-graduação (12,7%; $n = 69$).Por fim,
+no que concerne ao estado civil, a amostra foi majoritariamente
+constituída por solteiros, representando 79,8% ($n = 434$) dos
+participantes. Indivíduos casados ou em união estável corresponderam a
+16,4% ($n = 89$), enquanto separados/divorciados e viúvos representaram
+a menor parcela do grupo (aproximadamente 3,9%).
+
+# Propriedades Psicométricas da Bateria de Testes de Inteligência Emocional
+
+# Teste de Percepção Emojional
+
+### Pontuação por consenso - Proporcional
+```{r}
+# Salvar os itens em um dataframe separado
+tpe = df1 %>% select(13:92)
+# 1. Definição das variáveis (tpe_p01 até tpe_p80)
+vars_tpe <- paste0("tpe_p", sprintf("%02d", 1:80))
+
+tpe <- df1 %>%
+  select(13:92) %>%                 # pega as 80 colunas
+  setNames(vars_tpe)                # renomeia para tpe_p01...tpe_p80
+
+# 2. Função de Conversão Ajustada
+# Esta função pega a coluna inteira, calcula a tabela de proporções
+# e usa essa tabela como um "dicionário" para traduzir os valores.
+converter_para_consenso_direto <- function(coluna) {
+  
+  # A) Calcula a proporção de cada resposta (ex: 1=0.55, 2=0.17...)
+  # O uso de table() gera um vetor nomeado.
+  tabela_props <- prop.table(table(coluna))
+  
+  # B) O "Lookup" (Tradução)
+  # Aqui está o segredo: convertemos a coluna original para CARACTERE.
+  # Isso força o R a buscar na tabela pelo NOME da resposta ("1", "3")
+  # e não pela posição.
+  coluna_char <- as.character(coluna)
+  
+  # Busca o valor correspondente na tabela
+  valores_convertidos <- tabela_props[coluna_char]
+  
+  # C) Retorna como numérico limpo
+  return(as.numeric(valores_convertidos))
+}
+
+# 3. Execução da Transformação
+# Criamos um novo objeto 'tpe_escores' para não perder os dados originais
+tpe_escores <- tpe %>%
+  mutate(across(
+    .cols = all_of(vars_tpe), 
+    .fns = converter_para_consenso_direto
+  ))
+
+# 4. Criação da Lista de Normas
+# Selecionamos apenas as colunas do TPE e aplicamos a tabela de proporção em cada uma
+normas_tpe <- tpe %>%
+  select(all_of(vars_tpe)) %>%
+  map(~ prop.table(table(.)))
+
+# 4. Verificação dos Resultados (Comparação Antes vs Depois)
+# Vamos olhar para o tpe_p01 e tpe_p02 para confirmar se bate com seu exemplo.
+
+print(head(tpe[, c("tpe_p01", "tpe_p02")]))
+print(head(tpe_escores[, c("tpe_p01","tpe_p02")]))
+
+# 5. Transformar a lista em um Data Frame "Tidy" (long format) - CORRIGIDO
+df_normas_visualizacao <- normas_tpe %>%
+  map_dfr(function(tabela) {
+    as.data.frame(tabela) %>% 
+      set_names(c("resposta", "proporcao")) # Define nomes fixos para todas as tabelas
+  }, .id = "item")
+
+# Visualizar o resultado
+head(df_normas_visualizacao)
+
+# 6. Exportar
+write_xlsx(df_normas_visualizacao, "tabela_normas_tpe.xlsx")
+
+# ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# Cálculo das Pontuações por Imagem (Média dos blocos de 5 itens)===============
+# ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+# Loop iterando de 1 a 16 (para criar as colunas tpe01 até tpe16)
+for (i in 1:16) {
+  
+  # 1. Definir o intervalo dos itens para a imagem atual
+  # Fórmula: 
+  # Se i=1: start=1, end=5
+  # Se i=2: start=6, end=10 ...
+  start_idx <- (i - 1) * 5 + 1
+  end_idx   <- i * 5
+  
+  # 2. Gerar os nomes das 5 colunas que compõem este bloco
+  # sprintf("%02d") garante o formato com zero à esquerda (ex: tpe_p01, tpe_p05)
+  cols_do_bloco <- paste0("tpe_p", sprintf("%02d", start_idx:end_idx))
+  
+  # 3. Definir o nome da nova coluna de destino (ex: tpe01, tpe02)
+  nome_nova_coluna <- paste0("tpe", sprintf("%02d", i))
+  
+  # 4. Calcular a média e salvar no dataframe tpe_escores
+  # rowMeans calcula a média de cada participante para as colunas selecionadas
+  # na.rm = TRUE garante que, se houver um NA pontual, a média é calculada com os restantes
+  tpe_escores[[nome_nova_coluna]] <- rowMeans(tpe_escores[cols_do_bloco], na.rm = TRUE)
+}
+
+# Verificação dos Resultados
+# Vamos inspecionar a primeira imagem (tpe01) e seus itens constituintes (p01 a p05)
+tpe_escores %>%
+  select(tpe_p01, tpe_p02, tpe_p03, tpe_p04, tpe_p05, tpe01) %>%
+  head(10) %>%
+  kable(caption = "Conferência: Itens do Bloco 1 e sua Média (tpe01)")
+
+# juntar tpe_escores a df1
+
+df1 <- bind_cols(df1, tpe_escores)
+
+```
+
+
+### Pontuação por consenso - Dicotômica
+```{r}
+# 1. Gerar o Gabarito (Identificar a moda de cada item)
+# map_chr: itera sobre a lista de normas e retorna um vetor de texto
+gabarito_tpe <- map_chr(normas_tpe, function(tabela_prop) {
+  # Encontra o índice do valor máximo na tabela
+  idx_max <- which.max(tabela_prop)
+  
+  # Retorna o NOME da categoria (ex: "1", "3") associada a esse máximo
+  return(names(tabela_prop)[idx_max])
+})
+
+# Visualizar o gabarito gerado (primeiros 10 itens)
+print(head(gabarito_tpe, 10))
+
+# Salvar o objeto de gabarito para uso futuro
+saveRDS(gabarito_tpe, "gabarito_dicotomico_tpe.rds")
+
+# 2. Calcular a Pontuação Dicotômica
+# map2_dfc: Itera sobre os dados (x) e o gabarito (y) criando um Data Frame de Colunas
+df_escores_dicotomicos <- map2_dfc(
+  .x = tpe %>% select(all_of(vars_tpe)), # Dados dos participantes
+  .y = gabarito_tpe,                     # Resposta correta de cada item
+  .f = function(respostas_sujeito, resposta_correta) {
+    
+    # Lógica de comparação:
+    # Transforma em 1 se for igual ao gabarito, 0 se for diferente
+    # A conversão as.character garante que estamos comparando texto com texto
+    pontuacao <- if_else(as.character(respostas_sujeito) == resposta_correta, 1, 0)
+    
+    # Tratamento de NAs:
+    # Se o sujeito não respondeu (NA), a comparação acima gera NA.
+    # Em testes, geralmente NA vale 0 pontos. Se quiser manter NA, remova a linha abaixo.
+    pontuacao <- replace_na(pontuacao, 0)
+    
+    return(pontuacao)
+  }
+)
+
+# Adicionar sufixo "_dic" aos nomes das colunas para diferenciar dos escores de consenso
+colnames(df_escores_dicotomicos) <- paste0(names(df_escores_dicotomicos), "_dic")
+
+# Visualizar o resultado (comparando resposta original com a pontuação)
+# Mostra as respostas originais e os pontos dicotômicos lado a lado
+bind_cols(
+  select(tpe, tpe_p01), 
+  select(df_escores_dicotomicos, tpe_p01_dic),
+  Gabarito_Item_01 = gabarito_tpe["tpe_p01"]
+) %>% head(10)
+
+# Salvar o dataframe de escores dicotômicos
+saveRDS(df_escores_dicotomicos, "escores_dicotomicos_tpe_2025.rds")
+
+# (Opcional) Se quiser salvar em Excel para inspeção visual
+write_xlsx(df_escores_dicotomicos, "escores_dicotomicos_tpe.xlsx")
+
+# ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# Cálculo das Pontuações dicotômicas por Imagem ================================
+# ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+# Loop para criar as 16 colunas agregadas (tpe01_dic até tpe16_dic)
+for (i in 1:16) {
+  
+  # 1. Definir o intervalo do bloco (5 itens por imagem)
+  start_idx <- (i - 1) * 5 + 1
+  end_idx   <- i * 5
+  
+  # 2. Gerar os nomes das colunas de origem (agora com sufixo _dic)
+  # Ex: tpe_p01_dic, tpe_p02_dic ... tpe_p05_dic
+  cols_do_bloco <- paste0("tpe_p", sprintf("%02d", start_idx:end_idx), "_dic")
+  
+  # 3. Definir o nome da nova coluna de destino
+  # Ex: tpe01_dic
+  nome_nova_coluna <- paste0("tpe", sprintf("%02d", i), "_dic")
+  
+  # 4. Calcular a SOMA (total de acertos) e salvar
+  # na.rm = TRUE trata NAs como zero na soma (não anula o total se faltar 1 item)
+  df_escores_dicotomicos[[nome_nova_coluna]] <- rowSums(df_escores_dicotomicos[cols_do_bloco], na.rm = TRUE)
+}
+
+# Verificação dos Resultados
+# Exibe os 5 primeiros itens dicotômicos e o total da imagem 1
+df_escores_dicotomicos %>%
+  select(tpe_p01_dic, tpe_p02_dic, tpe_p03_dic, tpe_p04_dic, tpe_p05_dic, tpe01_dic) %>%
+  head(10) %>%
+  kable(caption = "Conferência: Soma dos Acertos no Bloco 1 (tpe01_dic)")
+
+# junção de df_escores_dicotomicos com df1
+df1 <- bind_cols(df1,df_escores_dicotomicos)
+
+write_xlsx(df1,"df1.xlsx")
+```
+
+### Validade com base na estrutura interna - TPE por consenso
+```{r}
+
+# 1. EFA com pontuações por consenso proporcionais =============================
+tpe_prop_names <- tpe_escores %>% select(81:96) %>% colnames()
+
+fa.parallel(tpe_escores[tpe_prop_names], plot = TRUE)
+# Análise paralela indica 2 fatores, mas o segundo fator tem eigen < 1
+# Então, optou-se pela extração de 1 fator.
+
+fa_tpe_pro = fa(tpe_escores[tpe_prop_names])
+print.psych(fa_tpe_pro,sort = TRUE)
+
+# Fidedignidade do TPE:
+tpe_escores %>% select(80:96) %>% omega(digits = 2, plot=FALSE)
+
+# pontuação total
+tpe_escores$tpe_pro_total <- tpe_escores %>% select(80:96) %>% rowMeans()
+
+df1$tpe_pro_total = tpe_escores$tpe_pro_total %>% round(digits = 2)
+```
+
+A validade baseada na estrutura interna do TPE, pontuado pelo método de consenso, foi investigada por meio de uma Análise Fatorial Exploratória (EFA). Utilizou-se o método de extração de Mínimos Resíduos (Minimum Residuals - MinRes) a partir da matriz de correlação das 16 imagens que compõem o instrumento.
+
+Para a determinação do número de fatores a serem retidos, considerou-se inicialmente o resultado da Análise Paralela, que sugeriu a existência de dois componentes. No entanto, a inspeção dos autovalores (eigenvalues) revelou que o segundo fator apresentava um valor inferior a 1,0 (Critério de Kaiser), o que justifica teórica e estatisticamente a opção pela extração de uma estrutura unifatorial.
+
+A solução de fator único demonstrou-se robusta e interpretável. Todas as 16 imagens apresentaram cargas fatoriais (factor loadings) substanciais, variando entre 0,55 (tpe05 e tpe15) e 0,70 (tpe13), situando-se muito acima do ponto de corte tradicional de 0,30 ou 0,40, o que indica uma forte saturação dos itens no construto latente de percepção emocional. O fator retido explicou 38% da variância total dos dados.
+
+A adequação do modelo unifatorial foi corroborada pelos índices de ajuste, que se mostraram excelentes. O índice Tucker-Lewis Index (TLI) foi de 0,969, superando o valor de referência de 0,95 para um bom ajuste. O erro de aproximação (Root Mean Square Error of Approximation - RMSEA) foi de 0,037 (IC 90% [0,028; 0,046]), situando-se confortavelmente abaixo do limite de 0,05, indicando um erro de aproximação desprezível. Adicionalmente, o RMSR (Root Mean Square of the Residuals) foi de 0,03, sugerindo resíduos de correlação muito baixos.
+
+Por fim, a consistência interna da solução fatorial foi aferida pelos coeficientes alfa de Cronbach, lambda de Guttman e ômega de McDonald, cujos valores foram de 0.9, 0.9 e 0.91, respectivamente.
+
+### Validade com base na estrutura interna - TPE pontuações dicotômicas
+```{r}
+
+# Análise paralela
+itens_tpe_dic <- df_escores_dicotomicos %>% select(81:96) %>% colnames()
+
+fa.parallel(df_escores_dicotomicos[itens_tpe_dic],cor = "poly")
+# novamente, a análise paralela sugere 3 fatores, mas somente o primeiro apresentou eigenvalue superior a 1. 
+
+# Análise FAtorial exploratória
+fa_tpe_dic = fa(df_escores_dicotomicos[itens_tpe_dic], cor = "poly")
+print.psych(fa_tpe_dic,sort = TRUE)
+
+# Fidedignidade
+df_escores_dicotomicos %>% select(81:96) %>% omega(digits = 2, plot=FALSE)
+
+# Pontualção total
+df_escores_dicotomicos$tpe_dic_total <- df_escores_dicotomicos %>% select(81:96) %>% rowMeans()
+
+# juntar pontuação dicotômica em df1
+df1$tpe_dic_total <- df_escores_dicotomicos$tpe_dic_total %>% round(digits = 2)
+```
+
+A estrutura interna do TPE também foi avaliada considerando o método de pontuação dicotômica (acerto/erro), agregada por imagem. Para tanto, conduziu-se uma Análise Fatorial Exploratória (EFA) com método de extração de Mínimos Resíduos (MinRes), baseada na matriz de correlações policóricas, adequada à natureza ordinal dos escores acumulados por imagem.
+
+A solução unifatorial examinada demonstrou adequação para representar o conjunto de itens. As cargas fatoriais variaram de 0,45 (tpe03_dic) a 0,67 (tpe07_dic). Embora ligeiramente inferiores às observadas no método de consenso, todas as cargas mantiveram-se acima de 0,40, evidenciando que as 16 imagens, mesmo quando pontuadas de forma dicotômica, saturam significativamente em um único fator latente. Esta estrutura foi responsável por explicar 30% da variância total dos dados.
+
+Os índices de ajuste do modelo unifatorial apresentaram valores satisfatórios, embora discretamente inferiores aos do método de consenso. O Tucker-Lewis Index (TLI) foi de 0,912, situando-se acima do patamar de 0,90 considerado aceitável para ajuste. O RMSEA foi de 0,054 (IC 90% [0,046; 0,062]), indicando um ajuste adequado (próximo a 0,05). O RMSR (Root Mean Square of the Residuals) foi de 0,05, reforçando a aceitabilidade do modelo.
+
+Por fim, a consistência interna da solução fatorial foi aferida pelos coeficientes alfa de Cronbach, lambda de Guttman e ômega de McDonald, cujos valores foram de 0.87, 0.87 e 0.89, respectivamente.
+
+# Cópia de segurança 2 - df1_seg2
+```{r}
+df1_seg2 = df1
+```
+
+# Teste de Compreensão de Emoções
+
+### Compilação de bancos de dados
+```{r}
+# 1) TCE Doutorado Northon
+df_tce_northon <- read_xlsx("outros_bancos/data_base_tce_northon.xlsx")
+
+# Sexo -------------------------------------------------------------------------
+df_tce_northon <- df_tce_northon %>%
+  mutate(
+    sexo_bin = factor(
+      sexo_bin, 
+                      
+      # Atenção à inversão proposital aqui:
+      levels = c(2, 1), # Dizemos ao R: "Procure primeiro o 2, depois o 1"
+      labels = c("Feminino", "Masculino")) # E nomeie: "O 2 vira Feminino, o 1 vira Masculino"
+  )
+
+levels(df1$sexo_bin)
+levels(df_tce_northon$sexo_bin)
+
+### teste para verificar se os níveis são identicos
+
+identical(levels(df1$sexo_bin), levels(df_tce_northon$sexo_bin))
+
+# Cor --------------------------------------------------------------------------
+# 1. Obter a "regua" de referência (os níveis corretos do df1)
+# Isso deve retornar: "Amarela" "Branca" "Parda" "Preta" "Indígena"
+niveis_cor <- levels(df1$cor)
+
+df_tce_northon <- df_tce_northon %>%
+  mutate(
+    # Passo A: Transformar os números em texto/fator
+    # Cuidado: A ordem aqui deve obedecer estritamente ao que você disse:
+    # 1=Branca, 2=Preta, 3=Parda, 4=Indígena
+    cor = factor(cor, 
+                 levels = c(1, 2, 3, 4), 
+                 labels = c("Branca", "Preta", "Parda", "Indígena")),
+    
+    # Passo B: Re-fatorar usando a referência do df1
+    # Isso faz duas coisas mágicas:
+    # 1. Adiciona "Amarela" (que não existe aqui) como nível válido.
+    # 2. Reordena tudo para ficar idêntico ao df1.
+    cor = factor(cor, levels = niveis_cor)
+  )
+
+identical(levels(df1$cor), levels(df_tce_northon$cor))
+
+# Estado civil ---------------------------------------------------------------
+
+levels(df1$est_civil)
+count(df_tce_northon,est_civil)
+
+# 1. Capturar os níveis de referência do banco principal (df1)
+# Níveis esperados: "Casado(a)", "Separado(a)...", "Solteiro(a)", "União estável", "Viúvo(a)"
+niveis_estciv <- levels(df1$est_civil)
+
+df_tce_northon <- df_tce_northon %>%
+  mutate(
+    # PASSO A: Traduzir os códigos numéricos para texto
+    # Definimos levels = c(1, 2, 3) para ignorar propositalmente o 4, 5 e 6.
+    # Ao não incluir 4, 5 e 6 em 'levels', o R os converte automaticamente para NA.
+    est_civil = factor(est_civil,
+                       levels = c(1, 2, 3),
+                       labels = c("Casado(a)", 
+                                  "Solteiro(a)", 
+                                  "Separado(a) ou divorciado(a)")),
+    
+    # PASSO B: Reordenar e expandir para igualar ao df1
+    # Aqui, "União estável" e "Viúvo(a)" serão criados como níveis vazios.
+    est_civil = factor(est_civil, levels = niveis_estciv)
+  )
+
+identical(levels(df1$est_civil), levels(df_tce_northon$est_civil))
+
+# escolaridade -----------------------------------------------------------------
+count(df_tce_northon,escolaridade)
+
+df_tce_northon <- df_tce_northon %>%
+  mutate(escolaridade = 
+           factor(escolaridade,
+                  levels = c(1, 2, 3, 4),
+                  labels = c("Ensino fundamental completo ou incompleto",
+                             "Ensino médio completo ou incompleto", 
+                             "Ensino superior completo ou incompleto (graduação)",
+                             "Ensino superior completo ou incompleto (pós-graduação)")))
+
+identical(levels(df1$escolaridade), levels(df_tce_northon$escolaridade))
+
+# renda ------------------------------------------------------------------------
+
+count(df_tce_northon,renda)
+
+df_tce_northon <- df_tce_northon %>%
+  mutate(renda = 
+           factor(renda,
+                  levels = c(1, 2, 3, 4, 5),
+                  labels = c("Até R$1.200",
+                             "De R$ 1.200 a R$ 2.400", 
+                             "De R$ 2.400 a R$ 5.000",
+                             "De R$ 5.000 a R$ 10.000",
+                             "Acima de R$ 10.000")))
+
+levels(df_tce_northon$renda)
+
+df_tce_northon <- df_tce_northon %>%
+  mutate(renda_familiar = 
+           factor(renda_familiar,
+                  levels = c(1, 2, 3, 4, 5),
+                  labels = c("Até R$1.200",
+                             "De R$ 1.200 a R$ 2.400", 
+                             "De R$ 2.400 a R$ 5.000",
+                             "De R$ 5.000 a R$ 10.000",
+                             "Acima de R$ 10.000")))
+
+levels(df_tce_northon$renda_familiar)
+
+# juntar df_tce_northon com df1 ------------------------------------------------
+
+# --- A. Pequeno ajuste de nomes para não perder dados (Recomendado) ---
+# Transforma ice1 -> icer01, ice10 -> icer10, etc., para bater com df1
+names(df_tce_northon) <- gsub("^ice([0-9])$", "icer0\\1", names(df_tce_northon))
+names(df_tce_northon) <- gsub("^ice([0-9]{2})$", "icer\\1", names(df_tce_northon))
+names(df_tce_northon)
+# --- B. O Procedimento de União Solicitado ---
+
+# 1. Identificar quais colunas do Northon existem no df1
+colunas_para_aproveitar <- intersect(names(df1), names(df_tce_northon))
+
+# 2. Preparar o subconjunto de dados do Northon
+# Selecionamos APENAS as colunas que coincidem.
+# Isso descarta as variáveis exclusivas de Northon automaticamente.
+df_northon_pronto <- df_tce_northon %>%
+  select(all_of(colunas_para_aproveitar))
+
+# 3. Empilhar os dataframes (Row Binding)
+# O bind_rows é inteligente: 
+# - Encaixa as colunas selecionadas.
+# - Preenche com NA todas as outras colunas de df1 que não existem no df_northon_pronto.
+df1_expandido <- bind_rows(df1, df_northon_pronto)
+
+# --- C. Verificação ---
+
+# Verificar se o número de linhas aumentou corretamente
+print(paste("Linhas originais:", nrow(df1)))
+print(paste("Linhas adicionadas:", nrow(df_northon_pronto)))
+print(paste("Total final:", nrow(df1_expandido)))
+
+# Verificar visualmente o final do dataframe (onde estão os novos casos)
+# Focando em uma coluna que devia ter dados (idade) e uma que deve ser NA (tpe01)
+tail(df1_expandido %>% select(id, idade, tpe01), 10)
+```
+
+
+
+### Banco de dados principal
+```{r}
+# criar dataframe só com os itens de tce
+tce = df1 %>% select(93:110)
+
+# Criação do Dicionário e Gabarito do TCE
+dicionario_tce <- tibble(
+  cod_item = sprintf("CE%02d", 1:18), # Gera automaticamente CE01 a CE18
+  gabarito = c(
+    "Da angústia à alegria",
+    "Surpresa, raiva e depois nojo.",
+    "Em um jantar romântico, seu companheiro(a) lhe pedisse em casamento.",
+    "Primeiro angústia e em seguida aceitação.",
+    "Confiança – Decepção.",
+    "Da alegria à surpresa.",
+    "Ansiedade e êxtase.",
+    "Fúria – terror – admiração.",
+    "Nojo – repugnância.",
+    "Da raiva ao medo",
+    "Submissão.",
+    "X = Remorso.",
+    "Alegria, ansiedade e confiança.",
+    "Agressivo.",
+    "Intimidação.",
+    "Caso um amigo querido conquistasse um bom emprego em um lugar distante.",
+    "Desaprovação.",
+    "Medo e repugnância."
+  )
+)
+
+# Visualizar o dicionário para conferência
+print(dicionario_tce)
+
+# Exportar os itens e códigos para um dicionário em excel.
+writexl::write_xlsx(dicionario_tce,"dicionario_tce.xlsx")
+
+# Correção automatizada
+# Compara a coluna (.x) com o gabarito correspondente (.y) e converte para inteiro
+tce_pontuado <- map2_df(
+  tce, 
+  dicionario_tce$gabarito, 
+  function(resposta_observada, gabarito_correto) {
+    as.integer(resposta_observada == gabarito_correto)
+  }
+)
+
+colnames(tce_pontuado) <- paste0("tce_dic", sprintf("%02d", 1:18))
+
+glimpse(df_tce_northon)
+glimpse(df1)
+
+# Junção do df_tce_northon com df1 ---------------------------------------------
+
+
+```
+
+### Validade com base na estrutura interna - TCE
+```{r}
+itens_tce <- paste0("tce_dic", sprintf("%02d", 1:18))
+
+# análise paralela
+fa.parallel(tce_pontuado[itens_tce], fm = "ml", cor = "poly")
+# Somente um fator apresentou eigenvalue superior a 1.
+
+fa_tce <- fa(tce_pontuado, fm = "ml", cor = "poly")
+print.psych(fa_tce,sort = TRUE)
+
+# eliminação de 5 itens por cargas inferiores a 0,4
+itens_tce1 <- tce_pontuado %>% select(-c(tce_dic04,tce_dic05, tce_dic15,tce_dic17)) %>% colnames()
+fa_tce1 <- fa(tce_pontuado[itens_tce1], fm = "ml", cor = "poly")
+print.psych(fa_tce1,sort = TRUE)
+
+# eliminação de 1 itens por cargas inferiores a 0,4
+itens_tce2 <- tce_pontuado %>% select(-c(tce_dic04,tce_dic05,tce_dic11,tce_dic15,tce_dic17)) %>% colnames()
+fa_tce2 <- fa(tce_pontuado[itens_tce2], fm = "ml", cor = "poly")
+print.psych(fa_tce2,sort = TRUE)
+
+# fidedignidade
+rely_tce <- tce_pontuado[itens_tce2] %>% omega(poly = TRUE, fm = "ml",plot = FALSE)
+
+# pontuação em tce_total
+tce_pontuado$tce_total <- tce_pontuado[itens_tce2] %>% rowSums()
+df1$tce_total <- tce_pontuado$tce_total
+
+```
+
+Para investigar a estrutura interna do Teste de Compreensão de Emoções (TCE), procedeu-se a uma Análise Fatorial Exploratória (AFE). Dado que os itens são de natureza dicotômica (certo/errado), utilizou-se a matriz de correlações policóricas. O método de extração fatorial escolhido foi o de Máxima Verossimilhança (*Maximum Likelihood* - ML), considerado robusto para a estimação de parâmetros em amostras adequadas.
+
+Inicialmente, a retenção de fatores foi guiada pela Análise Paralela (Parallel Analysis), comparando-se os *eigenvalues* empíricos com aqueles gerados aleatoriamente. O resultado indicou a pertinência de uma solução unifatorial, sendo o único fator a apresentar *eigenvalue* superior a 1 e acima da média das simulações aleatórias.
+
+Com base na estrutura unidimensional sugerida, realizou-se a primeira AFE contemplando todos os 18 itens originais. Adotou-se como critério de retenção de itens a apresentação de cargas fatoriais (saturações) iguais ou superiores a 0,40. O processo de refinamento do instrumento ocorreu de forma iterativa:
+
+1. **Primeira Iteração:** Foram excluídos quatro itens (CE04, CE05, CE15 e CE17) por não atingirem a carga fatorial mínima estabelecida de 0,40.
+2. **Segunda Iteração:** Após a reanálise com os itens remanescentes, identificou-se que o item CE11 também apresentou carga fatorial abaixo do ponto de corte, sendo consequentemente removido.
+
+O modelo final, composto por 13 itens, confirmou a estrutura unidimensional, explicando 26% da variância total do construto. As cargas fatoriais variaram entre 0,42 (Itens CE03 e CE18) e 0,67 (Item CE01), indicando que todos os itens retidos contribuem substancialmente para a medida do fator latente.
+
+Os índices de qualidade de ajuste do modelo apresentaram valores aceitáveis para uma estrutura exploratória: RMSR (*Root Mean Square of the Residuals*) = 0,06; RMSEA (*Root Mean Square Error of Approximation*) = 0,078 (IC 90%: 0,069 – 0,087); e TLI (*Tucker-Lewis Index*) = 0,82. O coeficiente de determinação dos escores fatoriais (*Multiple R square of scores with factors*) foi de 0,83, sugerindo uma boa fidedignidade dos escores estimados.
+
+A Tabela X apresenta as cargas fatoriais padronizadas e as comunalidades () para os 13 itens que compõem a versão final do TCE.
+
+**Tabela X. Cargas fatoriais, comunalidades e estatísticas descritivas do modelo final do TCE (N = 544)**
+
+| Item | Texto do Item (Resumido) | Carga Fatorial (ML) | Comunalidade () | Unicidade () |
+| --- | --- | --- | --- | --- |
+| CE01 | Da angústia à alegria | 0,67 | 0,45 | 0,55 |
+| CE08 | Fúria – terror – admiração | 0,59 | 0,35 | 0,65 |
+| CE13 | Alegria, ansiedade e confiança | 0,55 | 0,30 | 0,70 |
+| CE14 | Agressivo | 0,55 | 0,30 | 0,70 |
+| CE16 | Conquista de emprego (Amigo) | 0,55 | 0,30 | 0,70 |
+| CE10 | Da raiva ao medo | 0,54 | 0,29 | 0,71 |
+| CE02 | Surpresa, raiva e depois nojo | 0,53 | 0,28 | 0,72 |
+| CE09 | Nojo – repugnância | 0,46 | 0,21 | 0,79 |
+| CE07 | Ansiedade e êxtase | 0,45 | 0,20 | 0,80 |
+| CE12 | X = Remorso | 0,44 | 0,20 | 0,80 |
+| CE06 | Da alegria à surpresa | 0,44 | 0,19 | 0,81 |
+| CE03 | Pedido de casamento | 0,42 | 0,18 | 0,82 |
+| CE18 | Medo e repugnância | 0,42 | 0,18 | 0,82 |
+
+*Nota: Método de extração: Máxima Verossimilhança (ML) com correlações policóricas.*
+
+---
+
+**Observações para o pesquisador:**
+
+1. **Índice TLI:** O valor de TLI (0,82) está um pouco abaixo do corte tradicionalmente rigoroso de 0,90 ou 0,95. No texto, descrevi como "aceitável para estrutura exploratória", mas dependendo do rigor da revista ou da banca, pode ser necessário justificar isso com base na complexidade do construto ou comparar com outros instrumentos da área. O RMSEA e o RMSR, contudo, estão bons.
+2. **Variância Explicada:** A proporção de 0,26 (26%) é modesta. Isso é comum em itens dicotômicos e em construtos complexos, mas indica que há uma variância residual considerável () não explicada pelo fator único.
+3. **Amostra:** Citei  com base no output (`harmonic n.obs` e `total n.obs`). Certifique-se de que este é o número final após tratamento de *missing values*.
+
+
+# Teste de Regulação de Emoções
+
+```{r}
+names(df1) %>% as.data.frame()
+tre = df1 %>% select(111:150)
+
+# transformação das respostas em pontuações dicotômicas
+
+tre$tre_cod_01 <- ifelse(tre$RE01 == 4 | tre$RE01 == 5, 1, 0)
+tre$tre_cod_02 <- ifelse(tre$RE02 == 1 | tre$RE02 == 2, 1, 0)
+tre$tre_cod_03 <- ifelse(tre$RE03 == 4 | tre$RE03 == 5, 1, 0)
+tre$tre_cod_04 <- ifelse(tre$RE04 == 1 | tre$RE04 == 2, 1, 0)
+tre$tre_cod_05 <- ifelse(tre$RE05 == 1 | tre$RE05 == 2, 1, 0)
+tre$tre_cod_06 <- ifelse(tre$RE06 == 4 | tre$RE06 == 5, 1, 0)
+tre$tre_cod_07 <- ifelse(tre$RE07 == 3, 1, 0)
+tre$tre_cod_08 <- ifelse(tre$RE08 == 3, 1, 0)
+tre$tre_cod_09 <- ifelse(tre$RE09 == 4 | tre$RE09 == 5, 1, 0)
+tre$tre_cod_10 <- ifelse(tre$RE10 == 1 | tre$RE10 == 2, 1, 0)
+tre$tre_cod_11 <- ifelse(tre$RE11 == 4 | tre$RE11 == 5, 1, 0)
+tre$tre_cod_12 <- ifelse(tre$RE12 == 4 | tre$RE12 == 5, 1, 0)
+tre$tre_cod_13 <- ifelse(tre$RE13 == 4 | tre$RE13 == 5, 1, 0)
+tre$tre_cod_14 <- ifelse(tre$RE14 == 1 | tre$RE14 == 2, 1, 0)
+tre$tre_cod_15 <- ifelse(tre$RE15 == 1 | tre$RE15 == 2, 1, 0)
+tre$tre_cod_16 <- ifelse(tre$RE16 == 4 | tre$RE16 == 5, 1, 0)
+tre$tre_cod_17 <- ifelse(tre$RE17 == 3 | tre$RE17 == 4 | tre$RE17 == 5, 1, 0)
+tre$tre_cod_18 <- ifelse(tre$RE18 == 3 | tre$RE18 == 4 | tre$RE18 == 5, 1, 0)
+tre$tre_cod_19 <- ifelse(tre$RE19 == 1 | tre$RE19 == 2, 1, 0)
+tre$tre_cod_20 <- ifelse(tre$RE20 == 1 | tre$RE20 == 2, 1, 0)
+tre$tre_cod_21 <- ifelse(tre$RE21 == 4 | tre$RE21 == 5, 1, 0)
+tre$tre_cod_22 <- ifelse(tre$RE22 == 4 | tre$RE22 == 5, 1, 0)
+tre$tre_cod_23 <- ifelse(tre$RE23 == 4 | tre$RE23 == 5, 1, 0)
+tre$tre_cod_24 <- ifelse(tre$RE24 == 1 | tre$RE24 == 2, 1, 0)
+tre$tre_cod_25 <- ifelse(tre$RE25 == 1 | tre$RE25 == 2, 1, 0)
+tre$tre_cod_26 <- ifelse(tre$RE26 == 4 | tre$RE26 == 5, 1, 0)
+tre$tre_cod_27 <- ifelse(tre$RE27 == 4 | tre$RE27 == 5, 1, 0)
+tre$tre_cod_28 <- ifelse(tre$RE28 == 1 | tre$RE28 == 2 | tre$RE28 == 3, 1, 0)
+tre$tre_cod_29 <- ifelse(tre$RE29 == 1 | tre$RE29 == 2, 1, 0)
+tre$tre_cod_30 <- ifelse(tre$RE30 == 1 | tre$RE30 == 2, 1, 0)
+tre$tre_cod_31 <- ifelse(tre$RE31 == 4 | tre$RE31 == 5, 1, 0)
+tre$tre_cod_32 <- ifelse(tre$RE32 == 1 | tre$RE32 == 2, 1, 0)
+tre$tre_cod_33 <- ifelse(tre$RE33 == 1 | tre$RE33 == 2 | tre$RE33 == 3, 1, 0)
+tre$tre_cod_34 <- ifelse(tre$RE34 == 1 | tre$RE34 == 2, 1, 0)
+tre$tre_cod_35 <- ifelse(tre$RE35 == 1 | tre$RE35 == 2, 1, 0)
+tre$tre_cod_36 <- ifelse(tre$RE36 == 4 | tre$RE36 == 5, 1, 0)
+tre$tre_cod_37 <- ifelse(tre$RE37 == 4 | tre$RE37 == 5, 1, 0)
+tre$tre_cod_38 <- ifelse(tre$RE38 == 4 | tre$RE38 == 5, 1, 0)
+tre$tre_cod_39 <- ifelse(tre$RE39 == 1 | tre$RE39 == 2, 1, 0)
+tre$tre_cod_40 <- ifelse(tre$RE40 == 1 | tre$RE40 == 2, 1, 0)
+
+
+names(tre) %>% as.data.frame()
+
+# Modelo CFA TRE
+
+model_tre = 
+"TRE_ine =~ 
+tre_cod_02+
+tre_cod_10+
+tre_cod_20+
+tre_cod_24+
+tre_cod_25+
+tre_cod_29+
+tre_cod_30+
+tre_cod_32+
+tre_cod_34+
+tre_cod_39+
+tre_cod_40
+TRE_efi =~ 
+tre_cod_03+
+tre_cod_12+
+tre_cod_13+
+tre_cod_17+
+tre_cod_18+
+tre_cod_21+
+tre_cod_22+
+tre_cod_26+
+tre_cod_37+
+tre_cod_38"
+
+fit_tre <- cfa(model_tre, 
+           data = tre, 
+           estimator = "WLSMV",
+           ordered = names(tre[,c(
+'tre_cod_02',
+'tre_cod_10',
+'tre_cod_20',
+'tre_cod_24',
+'tre_cod_25',
+'tre_cod_29',
+'tre_cod_30',
+'tre_cod_32',
+'tre_cod_34',
+'tre_cod_39',
+'tre_cod_40',
+'tre_cod_03',
+'tre_cod_12',
+'tre_cod_13',
+'tre_cod_17',
+'tre_cod_18',
+'tre_cod_21',
+'tre_cod_22',
+'tre_cod_26',
+'tre_cod_37',
+'tre_cod_38')]))
+
+fitMeasures(fit_tce,fit.measures = c('chisq.scaled','df','gfi','cfi.scaled','tli.scaled','rmsea.scaled',
+                                     'rmsea.ci.lower.scaled','rmsea.ci.upper.scaled','rmsea','srmr','cfi',
+                                     'tli')) %>% kable()
+
+
+
+# OBS.: os indices .scaled, como o cfi.scaled, por exemplo, leva em conta o tamanho da amostra e é mais indicado para amostras pequenas (n< 200). 
+# node_labels_tce <- c(paste("ce",c(1,2,4:11,13:18),sep = ""), 'CE')
+node_labels_tce <- c(paste("ce",c(1:3,6:8,10:14,16,18),sep = ""), 'CE')
+
+semPaths(fit_tce,
+         whatLabels = "std",
+         style = "ram",
+         intercepts = FALSE,
+         residuals = FALSE, 
+         edge.label.cex = 1,
+         layout = 'circle',
+         rotation = 1,
+         edge.color = 'black',
+         color = list(lat='deepskyblue', man = 'grey'),
+         normalize=TRUE,
+         nodeLabels = node_labels_tce)
+
+cargas_tce <- parameterEstimates(fit_tce, standardized = TRUE) %>%
+  filter(op == "=~") %>%         # Seleciona apenas as relações fatoriais (cargas)
+  select(lhs, rhs, est, std.all) # lhs = fator, rhs = item, est = carga bruta, std.all = carga padronizada
+
+# Exibir em formato de tabela
+cargas_tce %>% knitr::kable(digits = 2)
+
+# Mostrar matriz de cargas fatoriais padronizadas
+inspect(fit_tce, what = "std")$lambda
+
+
+```
+
+
+# Teste de Regulação de Emoções
+
+### 1. Criação do Gabarito Inteligente
+```{r}
+
+# Definição das Regras de Correção
+# Agrupamos os itens por "Tipo de Resposta Correta"
+itens_4_5   <- c("RE01", "RE03", "RE06", "RE09", "RE11", "RE12", "RE13", 
+                 "RE16", "RE21", "RE22", "RE23", "RE26", "RE27", "RE31", 
+                 "RE36", "RE37", "RE38")
+
+itens_1_2   <- c("RE02", "RE04", "RE05", "RE10", "RE14", "RE15", "RE19", 
+                 "RE20", "RE24", "RE25", "RE29", "RE30", "RE32", "RE34", 
+                 "RE35", "RE39", "RE40")
+
+itens_3     <- c("RE07", "RE08")
+itens_3_4_5 <- c("RE17", "RE18")
+itens_1_2_3 <- c("RE28", "RE33")
+
+# Criação do Dataframe Dicionário
+# A coluna 'gabarito' será uma 'list-column' (uma lista dentro da célula)
+dicionario_tre <- bind_rows(
+  tibble(item = itens_4_5,   gabarito = list(c(4, 5))),
+  tibble(item = itens_1_2,   gabarito = list(c(1, 2))),
+  tibble(item = itens_3,     gabarito = list(c(3))),
+  tibble(item = itens_3_4_5, gabarito = list(c(3, 4, 5))),
+  tibble(item = itens_1_2_3, gabarito = list(c(1, 2, 3)))
+) %>%
+  # Ordenar para garantir que esteja de RE01 a RE40
+  arrange(as.numeric(str_extract(item, "\\d+")))
+
+# Visualizar a estrutura para entender
+print(dicionario_tre)
+```
+
+### 2. Transformação Automatizada (Correção)
+```{r}
+# Selecionar apenas as colunas do TRE no banco original
+# Certifique-se de que os nomes das colunas em 'tre_dados' batem com 'dicionario_tre$item'
+tre_dados <- df1 %>% select(starts_with("RE") & matches("RE\\d{2}")) %>% select(1:40) 
+
+# Correção Automática (Preservando NAs)
+tre_pontuado <- map2_df(
+  tre_dados,                
+  dicionario_tre$gabarito, 
+  function(respostas_sujeito, gabarito_item) {
+    
+    # 1. Verifica o acerto (Retorna TRUE/FALSE). NA vira FALSE aqui.
+    acerto <- respostas_sujeito %in% gabarito_item
+    
+    # 2. Converte para 0 e 1
+    pontuacao <- as.integer(acerto)
+    
+    # 3. O PASSO CRUCIAL: Onde era NA na entrada, volta a ser NA na saída
+    pontuacao[is.na(respostas_sujeito)] <- NA
+    
+    return(pontuacao)
+  }
+)
+
+# Renomear colunas
+colnames(tre_pontuado) <- paste0("tre_cod_", sprintf("%02d", 1:40))
+```
+
+# Validade com base na estrutura interna - TRE
+```{r}
+itens_tre <- paste0("tre_cod_", sprintf("%02d", 1:40))
+
+
+
+# Matriz de correlações policóricas
+cor_matrix_tre = polychoric(tre_pontuado[itens_tre])
+
+# análise paralela
+fa.parallel(cor_matrix_tre$rho,n.obs = nrow(tre_pontuado),fm = "ml",fa="fa")
+
+fa.parallel(tre_pontuado[itens_tre],fm = "ml",fa = "fa",use = "pairwise",cor = "poly")
+
+
+fa_tre <- fa(r = cor_matrix_tre$rho,
+             n.obs = nrow(tre_pontuado),
+                          fm = "ml",
+                          rotate = "geominQ")
+
+print.psych(fa_tre,sort = TRUE)
+
+```
+
+# Inventário de Competências Emocionais
+
+### Outros bancos de dados
+```{r}
+
+```
+

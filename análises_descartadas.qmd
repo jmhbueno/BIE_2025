@@ -1,0 +1,247 @@
+---
+title: "Bateria de Testes de Inteligência Emocional"
+subtitle: "Estudos Psicométricos 2025" 
+date: "`r Sys.Date()`"
+format:
+  html: 
+    toc: true
+    toc-depth: 3
+    toc-title: Sumário
+    toc-expand: true
+    toc-location: left
+execute: 
+  eval: true
+editor: 
+  markdown: 
+    wrap: 72
+---
+Essas análises foram descartadas, mas ainda podem ser uteis, então, guardei em um arquivo separado.
+```{r}
+
+
+# Confirmatória da estrutura unifatorial
+
+model_tpe <- "TPE =~ pe_sum01+
+                 pe_sum02+
+                 pe_sum03+
+                 pe_sum04+
+                 pe_sum05+
+                 pe_sum06+
+                 pe_sum07+
+                 pe_sum08+
+                 pe_sum09+
+                 pe_sum10+
+                 pe_sum11+
+                 pe_sum12+
+                 pe_sum13+
+                 pe_sum14+
+                 pe_sum15+
+                 pe_sum16"
+names(tpe)
+fit_tpe <-cfa(model_tpe,
+           data = tpe,
+           estimator = "WLSMV",
+           ordered = names(tpe[,161:176]))
+
+
+fitMeasures(fit_tpe,fit.measures = c('chisq.scaled','df','gfi','cfi.scaled','tli.scaled','rmsea.scaled',
+                                     'rmsea.ci.lower.scaled','rmsea.ci.upper.scaled','rmsea','srmr','cfi',
+                                     'tli')) %>% kable()
+# OBS.: os indices .scaled, como o cfi.scaled, por exemplo, leva em conta o tamanho da amostra e é mais indicado para amostras pequenas (n< 200).
+node_labels <- c(paste("pe",1:16,sep = ""), 'PE')
+
+semPaths(fit_tpe,
+         whatLabels = "std",
+         style = "ram",
+         intercepts = FALSE,
+         residuals = FALSE,
+         edge.label.cex = 2,
+         label.cex = 3,
+         node.width = 1,
+         node.height = 1,
+         layout = 'circle',
+         rotation = 1,
+         edge.color = 'black',
+         color = list(lat='deepskyblue', man = 'grey'),
+         normalize=TRUE,
+         nodeLabels = node_labels)
+```
+
+```{r}
+names(tce)
+tce = df1 %>% select(93:110)
+
+# Transofrmação das respostas em pontuações dicotômicas
+tce$ce01a <- ifelse(df1$CE01 == "Da angústia à alegria",1,0)
+tce$ce02a <- ifelse(df1$CE02 == "Surpresa, raiva e depois nojo.",1,0)
+tce$ce03a <- ifelse(df1$CE03 == "Em um jantar romântico, seu companheiro(a) lhe pedisse em casamento.",1,0)
+tce$ce04a <- ifelse(df1$CE04 == "Primeiro angústia e em seguida aceitação.",1,0)
+tce$ce05a <- ifelse(df1$CE05 == "Confiança – Decepção.",1,0)
+tce$ce06a <- ifelse(df1$CE06 == "Da alegria à surpresa.",1,0)
+tce$ce07a <- ifelse(df1$CE07 == "Ansiedade e êxtase.",1,0)
+tce$ce08a <- ifelse(df1$CE08 == "Fúria – terror – admiração.",1,0)
+tce$ce09a <- ifelse(df1$CE09 == "Nojo – repugnância.",1,0)
+tce$ce10a <- ifelse(df1$CE10 == "Da raiva ao medo",1,0)
+tce$ce11a <- ifelse(df1$CE11 == "Submissão.",1,0)
+tce$ce12a <- ifelse(df1$CE12 == "X = Remorso.",1,0)
+tce$ce13a <- ifelse(df1$CE13 == "Alegria, ansiedade e confiança.",1,0)
+tce$ce14a <- ifelse(df1$CE14 == "Agressivo.",1,0)
+tce$ce15a <- ifelse(df1$CE15 == "Intimidação.",1,0)
+tce$ce16a <- ifelse(df1$CE16 == "Caso um amigo querido conquistasse um bom emprego em um lugar distante.",1,0)
+tce$ce17a <- ifelse(df1$CE17 == "Desaprovação.",1,0)
+tce$ce18a <- ifelse(df1$CE18 == "Medo e repugnância.",1,0)
+
+view(tce)
+
+count(tce,CE17)
+count(tce,CE18)
+# Confirmatória da estrutura unifatorial
+
+model_tce = 
+"TCE =~ 
+ce01a+
+ce02a+
+ce03a+
+ce04a+
+ce05a+
+ce06a+
+ce07a+
+ce08a+
+ce09a+
+ce10a+
+ce11a+
+ce12a+
+ce13a+
+ce14a+
+ce15a+
+ce16a+
+ce17a+
+ce18a"
+
+# eliminação do item 17, que foi respondido incorretamente pela maioria dos respondentes.
+model_tce = 
+"TCE =~ 
+ce01a+
+ce02a+
+ce03a+
+ce04a+
+ce05a+
+ce06a+
+ce07a+
+ce08a+
+ce09a+
+ce10a+
+ce11a+
+ce12a+
+ce13a+
+ce14a+
+ce15a+
+ce16a+
+ce18a"
+
+# eliminação dos itens 4, 5, 9 e 15 por terem apresentado cargas inferiores a 0,3
+model_tce = 
+"TCE =~ 
+ce01a+
+ce02a+
+ce03a+
+ce06a+
+ce07a+
+ce08a+
+ce10a+
+ce11a+
+ce12a+
+ce13a+
+ce14a+
+ce16a+
+ce18a"
+
+count(tce,ce01a)
+count(tce,ce02a)
+count(tce,ce03a)
+count(tce,ce04a)
+count(tce,ce05a)
+count(tce,ce06a)
+count(tce,ce07a)
+count(tce,ce08a)
+count(tce,ce09a)
+count(tce,ce10a)
+count(tce,ce11a)
+count(tce,ce12a)
+count(tce,ce13a)
+count(tce,ce14a)
+count(tce,ce15a)
+count(tce,ce16a)
+count(tce,ce17a)
+count(tce,ce18a)
+
+# exclusão dos itens 3 e 12, por não haver variância.
+names(tce)
+fit_tce <- cfa(model_tce, 
+           data = tce, 
+           estimator = "WLSMV",
+           ordered = names(tce[,c(
+                                  'ce01a',
+                                  'ce02a',
+                                  'ce03a',
+                                  'ce06a',
+                                  'ce07a',
+                                  'ce08a',
+                                  'ce10a',
+                                  'ce11a',
+                                  'ce12a',
+                                  'ce13a',
+                                  'ce14a',
+                                  'ce16a',
+                                  'ce18a')]))
+
+fitMeasures(fit_tce,fit.measures = c('chisq.scaled','df','gfi','cfi.scaled','tli.scaled','rmsea.scaled',
+                                     'rmsea.ci.lower.scaled','rmsea.ci.upper.scaled','rmsea','srmr','cfi',
+                                     'tli')) %>% kable()
+
+
+
+# OBS.: os indices .scaled, como o cfi.scaled, por exemplo, leva em conta o tamanho da amostra e é mais indicado para amostras pequenas (n< 200). 
+# node_labels_tce <- c(paste("ce",c(1,2,4:11,13:18),sep = ""), 'CE')
+node_labels_tce <- c(paste("ce",c(1:3,6:8,10:14,16,18),sep = ""), 'CE')
+
+semPaths(fit_tce,
+         whatLabels = "std",
+         style = "ram",
+         intercepts = FALSE,
+         residuals = FALSE, 
+         edge.label.cex = 1,
+         label.cex = 3,
+         node.width = 1,
+         node.height = 1,
+         pastel = TRUE,
+         layout = 'circle',
+         rotation = 1,
+         edge.color = 'black',
+         color = list(lat='deepskyblue', man = 'grey'),
+         normalize=TRUE,
+         nodeLabels = node_labels_tce)
+
+cargas_tce <- parameterEstimates(fit_tce, standardized = TRUE) %>%
+  filter(op == "=~") %>%         # Seleciona apenas as relações fatoriais (cargas)
+  select(lhs, rhs, est, std.all) # lhs = fator, rhs = item, est = carga bruta, std.all = carga padronizada
+
+# Exibir em formato de tabela
+cargas_tce %>% knitr::kable(digits = 2)
+
+# Mostrar matriz de cargas fatoriais padronizadas
+inspect(fit_tce, what = "std")$lambda
+
+# Fidedignidade do TPE
+names(tce)
+
+tce %>% 
+  select('ce01a','ce02a','ce03a','ce06a','ce07a','ce08a','ce10a','ce11a','ce12a','ce13a','ce14a','ce16a','ce18a') %>% 
+  omega(fm = 'ml',poly = TRUE,digits = 2,plot=FALSE)
+
+# Análise fatorial exploratória
+# tce %>% select(19:34,36) %>% scree()
+# 
+# tce %>% select(19:34,36) %>% fa(nfactors = 1, fm = "ml", cor = "poly")
+```
+
